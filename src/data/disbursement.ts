@@ -200,6 +200,21 @@ export async function searchDrivers(q: string): Promise<DriverPublic[]> {
   }));
 }
 
+/** Distinct non-empty fleet names across the driver master (for assigning ops users). */
+export async function fetchFleets(): Promise<string[]> {
+  const { data, error } = await db()
+    .from("drivers")
+    .select("default_fleet")
+    .not("default_fleet", "is", null);
+  if (error) throw error;
+  const set = new Set<string>();
+  for (const r of data ?? []) {
+    const f = (r as any).default_fleet?.trim();
+    if (f) set.add(f);
+  }
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
 export type DriverInput = {
   name: string;
   rail: Rail;

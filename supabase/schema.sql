@@ -32,6 +32,7 @@ create table if not exists profiles (
   role user_role not null default 'requester',
   approved boolean not null default false,
   disbursement_approver boolean not null default false,
+  fleets text[],                    -- fleet names an ops/requester user may request for
   created_at timestamptz not null default now()
 );
 
@@ -163,10 +164,17 @@ $$;
 create or replace function search_drivers(q text default '')
 returns table (id uuid, name text, default_fleet text, garage text, active boolean)
 language sql stable security definer set search_path = public as $$
+  with me as (
+    select role, fleets from profiles where id = auth.uid() and approved
+  )
   select d.id, d.name, d.default_fleet, d.garage, d.active
-  from drivers d
-  where is_member() and d.active
+  from drivers d, me
+  where d.active
     and (q = '' or d.name ilike '%' || q || '%')
+    and (
+      me.role in ('encoder','approver','admin')            -- back-office: all fleets
+      or (me.fleets is not null and d.default_fleet = any(me.fleets)) -- ops: their fleets
+    )
   order by d.name limit 50;
 $$;
 
@@ -318,7 +326,7 @@ create policy drivers_update on drivers for update to authenticated
   with check (has_role(array['admin','encoder']::user_role[]));
 drop policy if exists drivers_delete on drivers;
 create policy drivers_delete on drivers for delete to authenticated
-  using (has_role(array['admin']::user_role[]));
+  using (has_role(array['encoder','admin']::user_role[]));
 
 -- requests
 drop policy if exists disb_req_read on disbursement_requests;
@@ -335,8 +343,11 @@ create policy disb_req_update on disbursement_requests for update to authenticat
   with check (requested_by = auth.uid() and status = 'Requested');
 drop policy if exists disb_req_delete on disbursement_requests;
 create policy disb_req_delete on disbursement_requests for delete to authenticated
-  using ((requested_by = auth.uid() and status = 'Requested')
-    or has_role(array['admin']::user_role[]));
+  using (
+    (requested_by = auth.uid() and status = 'Requested')
+    or (status = 'Requested' and has_role(array['encoder','admin']::user_role[]))
+    or has_role(array['admin']::user_role[])
+  );
 
 -- batches + payroll weeks: read by back-office; writes via RPCs only
 drop policy if exists disb_batch_read on disbursement_batches;

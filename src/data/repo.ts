@@ -712,7 +712,7 @@ export async function addEmployeeDocument(
 export async function fetchProfiles(): Promise<Profile[]> {
   const { data, error } = await db()
     .from("profiles")
-    .select("id, email, full_name, role, approved")
+    .select("id, email, full_name, role, approved, disbursement_approver, fleets")
     .order("created_at", { ascending: true });
   if (error) throw error;
   return (data ?? []).map((p: any) => ({
@@ -721,6 +721,8 @@ export async function fetchProfiles(): Promise<Profile[]> {
     fullName: p.full_name,
     role: p.role as UserRole,
     approved: p.approved,
+    disbursementApprover: p.disbursement_approver ?? false,
+    fleets: p.fleets ?? [],
   }));
 }
 
@@ -740,6 +742,28 @@ export async function setProfileRole(
   role: UserRole
 ): Promise<void> {
   const { error } = await db().from("profiles").update({ role }).eq("id", id);
+  if (error) throw error;
+}
+
+export async function setProfileFleets(
+  id: string,
+  fleets: string[]
+): Promise<void> {
+  const { error } = await db()
+    .from("profiles")
+    .update({ fleets })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+export async function setProfileApprover(
+  id: string,
+  disbursementApprover: boolean
+): Promise<void> {
+  const { error } = await db()
+    .from("profiles")
+    .update({ disbursement_approver: disbursementApprover })
+    .eq("id", id);
   if (error) throw error;
 }
 

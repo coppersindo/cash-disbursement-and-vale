@@ -59,6 +59,7 @@ export type Profile = {
   role: UserRole;
   approved: boolean;
   disbursementApprover?: boolean;
+  fleets?: string[];
 };
 
 export type DocStatus = "Valid" | "Expiring Soon" | "Expired";
