@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Loader2, Layers } from "lucide-react";
+import { AlertTriangle, Loader2, Layers, Trash2 } from "lucide-react";
 import { Badge } from "../ui";
 import { peso, toDateInput } from "../../lib/util";
 import {
+  deleteRequest,
   fetchPooledRequests,
   submitBatch,
   type DisbRequest,
@@ -96,6 +97,23 @@ export default function Encoder({
       onToast(`Submit failed: ${e.message ?? e}`);
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function removeRow(r: DisbRequest) {
+    if (!confirm(`Delete ${r.driverName}'s request for ${peso(r.amount)}?`))
+      return;
+    try {
+      await deleteRequest(r.id);
+      setPool((prev) => prev.filter((x) => x.id !== r.id));
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(r.id);
+        return next;
+      });
+      onToast("Request deleted");
+    } catch (e: any) {
+      onToast(`Delete failed: ${e.message ?? e}`);
     }
   }
 
@@ -201,19 +219,28 @@ export default function Encoder({
                           {r.justification || "—"}
                         </td>
                         <td className="px-3 py-2">
-                          {f && (
-                            <span
-                              title={f.reason}
-                              className={`inline-flex items-center gap-1 text-xs font-medium ${
-                                f.kind === "missing"
-                                  ? "text-red-600"
-                                  : "text-amber-600"
-                              }`}
+                          <div className="flex items-center justify-end gap-2">
+                            {f && (
+                              <span
+                                title={f.reason}
+                                className={`inline-flex items-center gap-1 text-xs font-medium ${
+                                  f.kind === "missing"
+                                    ? "text-red-600"
+                                    : "text-amber-600"
+                                }`}
+                              >
+                                <AlertTriangle size={13} />
+                                {f.kind === "missing" ? "Missing" : "Dup"}
+                              </span>
+                            )}
+                            <button
+                              onClick={() => removeRow(r)}
+                              className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                              title="Delete request"
                             >
-                              <AlertTriangle size={13} />
-                              {f.kind === "missing" ? "Missing" : "Dup"}
-                            </span>
-                          )}
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

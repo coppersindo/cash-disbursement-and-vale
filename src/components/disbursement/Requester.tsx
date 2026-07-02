@@ -19,7 +19,7 @@ import {
   Panel,
   PrimaryButton,
   RECEIPT_LABEL,
-  StatusBadge,
+  OpsStatusBadge,
   typeTone,
 } from "./shared";
 
@@ -88,7 +88,7 @@ export default function Requester({
                         {r.driverName}
                       </span>
                       <Badge tone={typeTone(r.type)}>{r.type}</Badge>
-                      <StatusBadge status={r.status} />
+                      <OpsStatusBadge status={r.status} />
                     </div>
                     <div className="mt-0.5 text-xs text-slate-500">
                       {peso(r.amount)} · {toDateInput(r.txnDate)} · cutoff{" "}
@@ -282,15 +282,17 @@ function DriverPicker({
   const [results, setResults] = useState<DriverPublic[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     if (selected) return;
     let cancelled = false;
     setLoading(true);
+    setErr(null);
     const t = setTimeout(() => {
       searchDrivers(q)
         .then((r) => !cancelled && setResults(r))
-        .catch(() => {})
+        .catch((e) => !cancelled && setErr(e?.message ?? "Driver search failed"))
         .finally(() => !cancelled && setLoading(false));
     }, 150);
     return () => {
@@ -355,9 +357,15 @@ function DriverPicker({
             <div className="px-3 py-3 text-center text-xs text-slate-400">
               Searching…
             </div>
+          ) : err ? (
+            <div className="px-3 py-3 text-center text-xs text-red-600">
+              {err}
+            </div>
           ) : results.length === 0 ? (
             <div className="px-3 py-3 text-center text-xs text-slate-400">
-              No drivers found.
+              {q
+                ? "No drivers match."
+                : "No drivers available for your fleet — ask your admin."}
             </div>
           ) : (
             results.map((d) => (

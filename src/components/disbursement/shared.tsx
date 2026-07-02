@@ -43,6 +43,25 @@ export function StatusBadge({ status }: { status: ReqStatus }) {
   return <Badge tone={reqStatusTone(status)}>{status}</Badge>;
 }
 
+/** Ops-facing relabel of the internal lifecycle (they don't see batching). */
+export function opsStatus(s: ReqStatus): { label: string; tone: Tone } {
+  switch (s) {
+    case "Approved":
+      return { label: "Approved", tone: "emerald" };
+    case "Disbursed":
+      return { label: "Uploaded", tone: "emerald" };
+    case "Rejected":
+      return { label: "Denied", tone: "red" };
+    default: // Requested / Submitted
+      return { label: "In review", tone: "amber" };
+  }
+}
+
+export function OpsStatusBadge({ status }: { status: ReqStatus }) {
+  const { label, tone } = opsStatus(status);
+  return <Badge tone={tone}>{label}</Badge>;
+}
+
 export function RailPill({ rail }: { rail: Rail }) {
   const tone: Tone = rail === "BPI" ? "amber" : "emerald";
   return <Badge tone={tone}>{rail}</Badge>;

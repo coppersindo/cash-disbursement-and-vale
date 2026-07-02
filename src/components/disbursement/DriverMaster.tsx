@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Download,
+  FileText,
   Pencil,
   Plus,
   Search,
@@ -77,8 +78,28 @@ export default function DriverMaster({
       setDrivers((prev) => prev.filter((x) => x.id !== d.id));
       onToast("Driver deleted");
     } catch (e: any) {
-      onToast(`Delete failed: ${e.message ?? e}`);
+      const msg = String(e?.message ?? e);
+      // FK violation → driver still referenced by requests
+      if (/foreign key|violates|referenced/i.test(msg))
+        onToast("Driver has requests — set it Inactive instead of deleting.");
+      else onToast(`Delete failed: ${msg}`);
     }
+  }
+
+  function downloadTemplate() {
+    const header = "name,rail,number,garage,default_fleet,active";
+    // Two example rows (BPI keeps leading zeros; Maya accepts 09… or 639…).
+    // Replace these with your real drivers before importing.
+    const examples = [
+      `Juan dela Cruz,BPI,"0123456789",Meycauayan Main,Dump – Bounty,true`,
+      `Pedro Santos,MAYA,"09171234567",Phividec,Tanker – Petron,true`,
+    ];
+    downloadFile(
+      "drivers-template.csv",
+      new Blob([[header, ...examples].join("\r\n") + "\r\n"], {
+        type: "text/csv",
+      })
+    );
   }
 
   function exportCsv() {
@@ -132,6 +153,9 @@ export default function DriverMaster({
           title="Driver master"
           actions={
             <div className="flex items-center gap-2">
+              <GhostButton onClick={downloadTemplate}>
+                <FileText size={15} /> Template
+              </GhostButton>
               <GhostButton onClick={exportCsv}>
                 <Download size={15} /> Export
               </GhostButton>
@@ -238,15 +262,13 @@ export default function DriverMaster({
                           >
                             <Pencil size={15} />
                           </button>
-                          {isAdmin && (
-                            <button
-                              onClick={() => remove(d)}
-                              className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                              title="Delete"
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          )}
+                          <button
+                            onClick={() => remove(d)}
+                            className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                            title="Delete"
+                          >
+                            <Trash2 size={15} />
+                          </button>
                         </div>
                       </td>
                     </tr>

@@ -55,7 +55,7 @@ export default function Login() {
             className="w-44 rounded-lg shadow-lg"
           />
           <p className="mt-3 text-sm text-slate-400">
-            HR Recruitment Directory
+            Disbursement &amp; Vale
           </p>
         </div>
 
