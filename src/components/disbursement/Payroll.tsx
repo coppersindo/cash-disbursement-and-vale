@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
+  FileSpreadsheet,
   Loader2,
   Lock,
   Printer,
 } from "lucide-react";
 import { Badge } from "../ui";
 import { formatDate, mondayOf, peso, toDateInput, weekLabel } from "../../lib/util";
+import { downloadFile, generateValeList } from "../../lib/fileGen";
 import {
   closeWeek,
   fetchRequestsForWeek,
@@ -108,6 +110,31 @@ export default function Payroll({
     }
   }
 
+  function downloadVale() {
+    if (disbursed.length === 0) return;
+    const rows = groups.flatMap((g) =>
+      g.rows
+        .slice()
+        .sort((a, b) => a.txnDate.getTime() - b.txnDate.getTime())
+        .map((r) => ({
+          driver: g.driverName,
+          date: toDateInput(r.txnDate),
+          type:
+            r.type === "CA" && r.caInstallment
+              ? `CA (${r.caInstallment})`
+              : r.type,
+          justification: r.justification || "",
+          amount: r.amount,
+        }))
+    );
+    generateValeList(weekLabel(weekStart), rows)
+      .then((buf) => {
+        downloadFile(`vale-${toDateInput(weekStart)}.xlsx`, buf);
+        onToast("Vale list downloaded");
+      })
+      .catch((e) => onToast(`Vale list failed: ${e.message ?? e}`));
+  }
+
   return (
     <div className="h-full overflow-y-auto p-6">
       <div className="mx-auto max-w-4xl space-y-4">
@@ -139,6 +166,14 @@ export default function Payroll({
             )}
           </div>
           <div className="flex items-center gap-2">
+            {disbursed.length > 0 && (
+              <button
+                onClick={downloadVale}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+              >
+                <FileSpreadsheet size={15} /> Vale list .xlsx
+              </button>
+            )}
             <button
               onClick={() => window.print()}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"

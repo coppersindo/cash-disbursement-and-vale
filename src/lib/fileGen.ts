@@ -78,12 +78,12 @@ export function mayaCsvBlob(lines: PayeeLine[]): Blob {
 
 // ---- BPI BizLink .xls (BIFF8) ----------------------------------------------
 
-/** 'YYYY-MM-DD' from a Date (local components). */
-function ymd(date: Date): string {
+/** 'MM/dd/yyyy' from a Date (local components) — the BizLink portal's format. */
+function payrollDateStr(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  return `${m}/${d}/${y}`;
 }
 
 /**
@@ -99,7 +99,7 @@ function bizLinkAoa(lines: PayeeLine[], payrollDate: Date) {
     [
       "H",
       "Payroll Date",
-      ymd(payrollDate),
+      payrollDateStr(payrollDate),
       "Payroll Time",
       "",
       "Total Amount",
@@ -166,15 +166,24 @@ export async function generateBizLink(
   const XLSX = await xlsx();
   const aoa = bizLinkAoa(lines, payrollDate);
 
-  let wb: XLSXTypes.WorkBook;
+  let wb: XLSXTypes.WorkBook | null = null;
 
+  // Try to inject into the real template; if it won't parse (e.g. a stray
+  // HTML/SPA response slipped through), silently fall back to from-scratch.
   if (templateBuffer) {
-    wb = XLSX.read(templateBuffer, { type: "array", cellStyles: true });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    // Overwrite from A1 down, leaving the rest of the template intact.
-    XLSX.utils.sheet_add_aoa(ws, aoa, { origin: "A1" });
-    forceAccountCellsText(XLSX, ws, 2, lines.length);
-  } else {
+    try {
+      const t = XLSX.read(templateBuffer, { type: "array", cellStyles: true });
+      const ws = t.Sheets[t.SheetNames[0]];
+      if (!ws) throw new Error("template has no sheet");
+      XLSX.utils.sheet_add_aoa(ws, aoa, { origin: "A1" });
+      forceAccountCellsText(XLSX, ws, 2, lines.length);
+      wb = t;
+    } catch {
+      wb = null; // fall through to the from-scratch builder
+    }
+  }
+
+  if (!wb) {
     wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     forceAccountCellsText(XLSX, ws, 2, lines.length);
@@ -194,6 +203,68 @@ export function bizLinkTestFile(templateBuffer?: ArrayBuffer): Promise<ArrayBuff
   return generateBizLink(lines, new Date(), templateBuffer);
 }
 
+// ---- Weekly vale list (.xlsx) ----------------------------------------------
+
+export type ValeRow = {
+  driver: string;
+  date: string; // yyyy-mm-dd
+  type: string;
+  justification: string;
+  amount: number;
+};
+
+/**
+ * Build the weekly vale list workbook:
+ *  - "Vale" sheet: itemized detail grouped by driver (Driver, Date, Type,
+ *    Justification, Amount) with a per-driver subtotal and a grand total.
+ *  - "Per driver" sheet: one total per driver.
+ */
+export async function generateValeList(
+  weekLabel: string,
+  rows: ValeRow[]
+): Promise<ArrayBuffer> {
+  const XLSX = await xlsx();
+
+  // group by driver, preserving sorted driver order
+  const byDriver = new Map<string, ValeRow[]>();
+  for (const r of [...rows].sort((a, b) => a.driver.localeCompare(b.driver))) {
+    (byDriver.get(r.driver) ?? byDriver.set(r.driver, []).get(r.driver)!).push(r);
+  }
+
+  const detail: (string | number)[][] = [
+    [`Weekly vale list — ${weekLabel}`],
+    [],
+    ["Driver", "Date", "Type", "Justification", "Amount"],
+  ];
+  let grand = 0;
+  for (const [driver, list] of byDriver) {
+    let sub = 0;
+    for (const r of list) {
+      detail.push([driver, r.date, r.type, r.justification, r.amount]);
+      sub += r.amount;
+    }
+    detail.push(["", "", "", `${driver} total`, sub]);
+    detail.push([]);
+    grand += sub;
+  }
+  detail.push(["", "", "", "GRAND TOTAL", grand]);
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(detail);
+  ws["!cols"] = [{ wch: 22 }, { wch: 12 }, { wch: 8 }, { wch: 34 }, { wch: 12 }];
+  XLSX.utils.book_append_sheet(wb, ws, "Vale");
+
+  const summary: (string | number)[][] = [["Driver", "Total"]];
+  for (const [driver, list] of byDriver)
+    summary.push([driver, list.reduce((s, r) => s + r.amount, 0)]);
+  summary.push(["GRAND TOTAL", grand]);
+  const ws2 = XLSX.utils.aoa_to_sheet(summary);
+  ws2["!cols"] = [{ wch: 22 }, { wch: 12 }];
+  XLSX.utils.book_append_sheet(wb, ws2, "Per driver");
+
+  return XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+}
+
 // ---- download helper --------------------------------------------------------
 
 export function downloadFile(filename: string, data: Blob | ArrayBuffer) {
@@ -208,19 +279,31 @@ export function downloadFile(filename: string, data: Blob | ArrayBuffer) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/** Try to load the real BizLink template from /public; null if absent. */
+/**
+ * True if the bytes look like a real spreadsheet: OLE2/.xls (D0 CF 11 E0) or
+ * ZIP/.xlsx (PK\x03\x04). A SPA serves index.html (200, starts with '<') for a
+ * missing path, so a status/size check isn't enough — we must sniff the bytes.
+ */
+function looksLikeSpreadsheet(buf: ArrayBuffer): boolean {
+  const b = new Uint8Array(buf).subarray(0, 4);
+  const ole2 = b[0] === 0xd0 && b[1] === 0xcf && b[2] === 0x11 && b[3] === 0xe0;
+  const zip = b[0] === 0x50 && b[1] === 0x4b && b[2] === 0x03 && b[3] === 0x04;
+  return ole2 || zip;
+}
+
+/** Try to load the real BizLink template from /public; undefined if absent. */
 export async function loadBizLinkTemplate(): Promise<ArrayBuffer | undefined> {
   for (const name of ["bpi-bizlink-template.xls", "bpi-bizlink-template.xlsx"]) {
     try {
       const res = await fetch(`/${name}`);
-      if (res.ok) {
-        const buf = await res.arrayBuffer();
-        // crude sanity check: real spreadsheets aren't a 200-but-HTML fallback
-        if (buf.byteLength > 100) return buf;
-      }
+      if (!res.ok) continue;
+      const ct = res.headers.get("content-type") ?? "";
+      if (ct.includes("text/html")) continue; // SPA fallback, not a file
+      const buf = await res.arrayBuffer();
+      if (looksLikeSpreadsheet(buf)) return buf;
     } catch {
       /* ignore — fall through to from-scratch builder */
     }
   }
-  return undefined;
+  return undefined; // build BizLink from scratch
 }
