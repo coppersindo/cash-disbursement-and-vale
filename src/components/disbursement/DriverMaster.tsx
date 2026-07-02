@@ -10,9 +10,8 @@ import {
   Loader2,
 } from "lucide-react";
 import { Modal, Select, Text } from "../forms";
-import { FleetField } from "../forms";
 import { Badge } from "../ui";
-import { GARAGES } from "../../data/types";
+import { FLEETS, GARAGES } from "../../data/types";
 import {
   createDriver,
   createDriversBulk,
@@ -91,8 +90,8 @@ export default function DriverMaster({
     // Two example rows (BPI keeps leading zeros; Maya accepts 09… or 639…).
     // Replace these with your real drivers before importing.
     const examples = [
-      `Juan dela Cruz,BPI,"0123456789",Meycauayan Main,Dump – Bounty,true`,
-      `Pedro Santos,MAYA,"09171234567",Phividec,Tanker – Petron,true`,
+      `Juan dela Cruz,BPI,"0123456789",Meycauayan Main,TERESA,true`,
+      `Pedro Santos,MAYA,"09171234567",Phividec,COKE LUZON,true`,
     ];
     downloadFile(
       "drivers-template.csv",
@@ -403,7 +402,15 @@ function DriverForm({
               ...GARAGES.map((g) => ({ value: g, label: g })),
             ]}
           />
-          <FleetField value={fleet} onChange={setFleet} />
+          <Select
+            label="Request group"
+            value={fleet}
+            onChange={setFleet}
+            options={[
+              { value: "", label: "— none —" },
+              ...FLEETS.map((f) => ({ value: f, label: f })),
+            ]}
+          />
           <div className="col-span-2">
             <label className="flex items-center gap-2 text-sm text-slate-700">
               <input

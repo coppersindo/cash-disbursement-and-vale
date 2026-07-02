@@ -7,7 +7,7 @@ import {
   setProfileFleets,
   setProfileRole,
 } from "../data/repo";
-import { fetchFleets } from "../data/disbursement";
+import { FLEETS } from "../data/types";
 import type { Profile, UserRole } from "../data/types";
 import { Badge } from "./ui";
 
@@ -21,16 +21,14 @@ export default function TeamView({
   onToast: (msg: string) => void;
 }) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [fleets, setFleets] = useState<string[]>([]);
+  const fleets = FLEETS as readonly string[] as string[];
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
     try {
-      const [ps, fs] = await Promise.all([fetchProfiles(), fetchFleets()]);
-      setProfiles(ps);
-      setFleets(fs);
+      setProfiles(await fetchProfiles());
     } catch (e: any) {
       onToast(`Load failed: ${e?.message ?? e}`);
     } finally {
@@ -264,11 +262,11 @@ function Row({
       {/* Fleet assignment — only relevant for ops (requester) users */}
       {p.approved && p.role === "requester" && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-1">
-          <span className="mr-1 text-xs font-medium text-slate-500">Fleets:</span>
+          <span className="mr-1 text-xs font-medium text-slate-500">
+            Request groups:
+          </span>
           {fleets.length === 0 ? (
-            <span className="text-xs text-slate-400">
-              No fleets yet — add drivers with a fleet in Driver Master.
-            </span>
+            <span className="text-xs text-slate-400">No groups defined.</span>
           ) : (
             fleets.map((f) => {
               const on = (p.fleets ?? []).includes(f);

@@ -31,6 +31,18 @@ export const GARAGES = [
   "Bacolor",
 ];
 
+// Request groups — a driver belongs to one; ops users are assigned one or more,
+// and can only file requests for drivers in their group(s).
+export const FLEETS = [
+  "TERESA",
+  "BACOLOR",
+  "MISAMIS",
+  "COKE LUZON",
+  "BATANGAS",
+  "ADMIN OFFICE",
+] as const;
+export type Fleet = (typeof FLEETS)[number];
+
 export const POSITIONS = ["Trailer Driver", "Truck Helper"] as const;
 export type Position = (typeof POSITIONS)[number];
 
