@@ -21,7 +21,11 @@ import {
   type HRDriverRow,
   type Rail,
 } from "../../data/disbursement";
-import { pullDriversFromHR } from "../../lib/hrSource";
+import {
+  isViewMissing,
+  pullDriversFromHR,
+  pullDriversFromHRView,
+} from "../../lib/hrSource";
 import { downloadFile } from "../../lib/fileGen";
 import {
   EmptyState,
@@ -299,7 +303,7 @@ export default function DriverMaster({
   );
 }
 
-// ---- HR sync modal: direct pull (HR login) or CSV fallback -------------------
+// ---- HR sync modal: one-click view pull, HR-login fallback, CSV fallback -----
 
 function SyncModal({
   importing,
@@ -316,8 +320,42 @@ function SyncModal({
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [showLogin, setShowLogin] = useState(false);
 
-  async function pull(e: React.FormEvent) {
+  async function finish(result: Awaited<ReturnType<typeof pullDriversFromHRView>>) {
+    const n = await syncDriversFromHR(result.rows);
+    let msg = `Synced ${n} driver${n === 1 ? "" : "s"} from HR`;
+    const notes: string[] = [];
+    if (result.missingPay.length)
+      notes.push(`${result.missingPay.length} missing pay info in HR`);
+    if (result.invalid.length)
+      notes.push(`${result.invalid.length} invalid number`);
+    if (notes.length) msg += ` (${notes.join(", ")})`;
+    onDone(msg);
+  }
+
+  /** Primary: no-login pull via the HR disb_drivers view. */
+  async function pullView() {
+    setErr(null);
+    setBusy(true);
+    try {
+      await finish(await pullDriversFromHRView());
+    } catch (e: any) {
+      if (isViewMissing(e)) {
+        setErr(
+          "The HR project doesn't have the disb_drivers view yet — run " +
+            "hr-view-disb-drivers.sql there once, or use HR sign-in below."
+        );
+        setShowLogin(true);
+      } else {
+        setErr(e.message ?? "Sync failed.");
+      }
+      setBusy(false);
+    }
+  }
+
+  /** Fallback: authenticated pull with an approved HR account. */
+  async function pullLogin(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
     if (!email.trim() || !password) {
@@ -326,16 +364,7 @@ function SyncModal({
     }
     setBusy(true);
     try {
-      const result = await pullDriversFromHR(email.trim(), password);
-      const n = await syncDriversFromHR(result.rows);
-      let msg = `Synced ${n} driver${n === 1 ? "" : "s"} from HR`;
-      const notes: string[] = [];
-      if (result.missingPay.length)
-        notes.push(`${result.missingPay.length} missing pay info in HR`);
-      if (result.invalid.length)
-        notes.push(`${result.invalid.length} invalid number`);
-      if (notes.length) msg += ` (${notes.join(", ")})`;
-      onDone(msg);
+      await finish(await pullDriversFromHR(email.trim(), password));
     } catch (e: any) {
       setErr(e.message ?? "Sync failed.");
       setBusy(false);
@@ -344,75 +373,100 @@ function SyncModal({
 
   return (
     <Modal title="Sync drivers from HR" onClose={onClose}>
-      <form onSubmit={pull}>
-        <p className="mb-3 text-sm text-slate-600">
-          Connects to the HR Recruitment Directory as you, pulls every active
-          driver with a mode of payment, and updates the list here. Your HR
-          login is used once and never stored.
-        </p>
-        <div className="space-y-3">
-          <Text
-            label="HR app email"
-            value={email}
-            onChange={setEmail}
-            required
-            placeholder="you@gitc.com.ph"
-          />
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-slate-600">
-              HR app password <span className="text-red-500">*</span>
-            </span>
-            <input
-              type="password"
-              value={password}
-              required
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
-            />
-          </label>
-        </div>
-        {err && <p className="mt-2 text-xs text-red-600">{err}</p>}
-        <div className="mt-4 flex justify-end gap-2">
+      <p className="mb-3 text-sm text-slate-600">
+        Pulls every active driver with a mode of payment straight from the HR
+        Recruitment Directory and updates the list here (matched by employee
+        number; your request-group assignments are kept).
+      </p>
+
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+        >
+          Cancel
+        </button>
+        <PrimaryButton onClick={pullView} disabled={busy}>
+          {busy && !showLogin ? (
+            <Loader2 size={15} className="animate-spin" />
+          ) : (
+            <RefreshCw size={15} />
+          )}
+          Pull from HR now
+        </PrimaryButton>
+      </div>
+
+      {err && <p className="mt-3 text-xs text-red-600">{err}</p>}
+
+      <div className="mt-5 border-t border-slate-100 pt-3">
+        {!showLogin ? (
           <button
             type="button"
-            onClick={onClose}
-            className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+            onClick={() => setShowLogin(true)}
+            className="text-xs font-medium text-slate-500 hover:text-amber-600"
           >
-            Cancel
+            Use HR sign-in instead
           </button>
-          <PrimaryButton type="submit" disabled={busy}>
-            {busy ? (
-              <Loader2 size={15} className="animate-spin" />
-            ) : (
-              <RefreshCw size={15} />
-            )}
-            Pull from HR
-          </PrimaryButton>
-        </div>
-
-        <div className="mt-5 border-t border-slate-100 pt-3">
-          <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-500 hover:text-amber-600">
-            {importing ? (
-              <Loader2 size={13} className="animate-spin" />
-            ) : (
-              <Upload size={13} />
-            )}
-            Or import the CSV from hr-export-drivers.sql
-            <input
-              type="file"
-              accept=".csv,text/csv"
-              className="hidden"
-              disabled={importing || busy}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                // importCsv toasts + reloads on its own; just close after
-                if (f) onCsv(f).finally(onClose);
-                e.target.value = "";
-              }}
+        ) : (
+          <form onSubmit={pullLogin} className="space-y-3">
+            <p className="text-xs text-slate-500">
+              Signs in to HR as you, reads the drivers, signs out. Credentials
+              are used once and never stored.
+            </p>
+            <Text
+              label="HR app email"
+              value={email}
+              onChange={setEmail}
+              required
+              placeholder="you@gitc.com.ph"
             />
-          </label>
-        </div>
-      </form>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-slate-600">
+                HR app password <span className="text-red-500">*</span>
+              </span>
+              <input
+                type="password"
+                value={password}
+                required
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
+              />
+            </label>
+            <div className="flex justify-end">
+              <PrimaryButton type="submit" disabled={busy}>
+                {busy ? (
+                  <Loader2 size={15} className="animate-spin" />
+                ) : (
+                  <RefreshCw size={15} />
+                )}
+                Sign in &amp; pull
+              </PrimaryButton>
+            </div>
+          </form>
+        )}
+
+        <label className="mt-3 inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-500 hover:text-amber-600">
+          {importing ? (
+            <Loader2 size={13} className="animate-spin" />
+          ) : (
+            <Upload size={13} />
+          )}
+          Or import the CSV from hr-export-drivers.sql
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            disabled={importing || busy}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              // importCsv toasts + reloads on its own; just close after
+              if (f) onCsv(f).finally(onClose);
+              e.target.value = "";
+            }}
+          />
+        </label>
+      </div>
     </Modal>
   );
 }
