@@ -51,6 +51,7 @@ export type DisbRequest = {
   weekStart: Date;
   receiptStatus: ReceiptStatus | null;
   caInstallment: string | null;
+  truckPlate: string;
   status: ReqStatus;
   batchId: string | null;
   requestedBy: string | null;
@@ -164,6 +165,7 @@ function mapRequest(row: any): DisbRequest {
     weekStart: toDate(row.week_start),
     receiptStatus: row.receipt_status ?? null,
     caInstallment: row.ca_installment ?? null,
+    truckPlate: row.truck_plate ?? "",
     status: row.status,
     batchId: row.batch_id ?? null,
     requestedBy: row.requested_by ?? null,
@@ -290,6 +292,7 @@ export type NewRequestInput = {
   txnDate: Date;
   receiptStatus: ReceiptStatus | null;
   caInstallment: string | null;
+  truckPlate: string;
 };
 
 export async function createRequest(input: NewRequestInput): Promise<void> {
@@ -305,6 +308,7 @@ export async function createRequest(input: NewRequestInput): Promise<void> {
       week_start: iso(weekStart),
       receipt_status: input.type === "Reimb" ? input.receiptStatus : null,
       ca_installment: input.type === "CA" ? input.caInstallment : null,
+      truck_plate: input.truckPlate || null,
       status: "Requested",
     });
   if (error) throw error;
@@ -347,6 +351,7 @@ export async function updateRequest(
   }
   if (patch.receiptStatus !== undefined) upd.receipt_status = patch.receiptStatus;
   if (patch.caInstallment !== undefined) upd.ca_installment = patch.caInstallment;
+  if (patch.truckPlate !== undefined) upd.truck_plate = patch.truckPlate || null;
   const { error } = await db()
     .from("disbursement_requests")
     .update(upd)

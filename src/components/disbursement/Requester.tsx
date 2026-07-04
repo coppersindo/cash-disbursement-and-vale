@@ -91,7 +91,8 @@ export default function Requester({
                       <OpsStatusBadge status={r.status} />
                     </div>
                     <div className="mt-0.5 text-xs text-slate-500">
-                      {peso(r.amount)} · {toDateInput(r.txnDate)} · cutoff{" "}
+                      {peso(r.amount)} · {toDateInput(r.txnDate)}
+                      {r.truckPlate && ` · 🚚 ${r.truckPlate}`} · cutoff{" "}
                       {weekLabel(r.weekStart)}
                     </div>
                     {r.justification && (
@@ -151,6 +152,7 @@ function NewRequestModal({
   const [txnDate, setTxnDate] = useState(toDateInput(new Date()));
   const [receipt, setReceipt] = useState<ReceiptStatus>("pending");
   const [caInstallment, setCaInstallment] = useState("");
+  const [truckPlate, setTruckPlate] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -167,6 +169,7 @@ function NewRequestModal({
     if (!(amt > 0)) return setErr("Amount must be greater than zero.");
     const date = fromDateInput(txnDate);
     if (!date) return setErr("Pick a transaction date.");
+    if (!truckPlate.trim()) return setErr("Enter the truck plate number.");
 
     setBusy(true);
     try {
@@ -178,6 +181,7 @@ function NewRequestModal({
         txnDate: date,
         receiptStatus: type === "Reimb" ? receipt : null,
         caInstallment: type === "CA" ? caInstallment.trim() || null : null,
+        truckPlate: truckPlate.trim().toUpperCase(),
       });
       onCreated();
     } catch (e: any) {
@@ -217,9 +221,16 @@ function NewRequestModal({
               onChange={setTxnDate}
               required
             />
-            <div className="flex items-end pb-1 text-xs text-slate-500">
-              Payroll cutoff: <span className="ml-1 font-medium">{weekStart}</span>
-            </div>
+            <Text
+              label="Truck plate"
+              value={truckPlate}
+              onChange={(v) => setTruckPlate(v.toUpperCase())}
+              required
+              placeholder="e.g. ABC 1234"
+            />
+          </div>
+          <div className="text-xs text-slate-500">
+            Payroll cutoff: <span className="font-medium">{weekStart}</span>
           </div>
 
           {type === "Reimb" && (

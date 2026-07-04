@@ -208,6 +208,7 @@ export function bizLinkTestFile(templateBuffer?: ArrayBuffer): Promise<ArrayBuff
 export type ValeRow = {
   driver: string;
   date: string; // yyyy-mm-dd
+  plate: string;
   type: string;
   justification: string;
   amount: number;
@@ -234,24 +235,31 @@ export async function generateValeList(
   const detail: (string | number)[][] = [
     [`Weekly vale list — ${weekLabel}`],
     [],
-    ["Driver", "Date", "Type", "Justification", "Amount"],
+    ["Driver", "Date", "Plate", "Type", "Justification", "Amount"],
   ];
   let grand = 0;
   for (const [driver, list] of byDriver) {
     let sub = 0;
     for (const r of list) {
-      detail.push([driver, r.date, r.type, r.justification, r.amount]);
+      detail.push([driver, r.date, r.plate, r.type, r.justification, r.amount]);
       sub += r.amount;
     }
-    detail.push(["", "", "", `${driver} total`, sub]);
+    detail.push(["", "", "", "", `${driver} total`, sub]);
     detail.push([]);
     grand += sub;
   }
-  detail.push(["", "", "", "GRAND TOTAL", grand]);
+  detail.push(["", "", "", "", "GRAND TOTAL", grand]);
 
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(detail);
-  ws["!cols"] = [{ wch: 22 }, { wch: 12 }, { wch: 8 }, { wch: 34 }, { wch: 12 }];
+  ws["!cols"] = [
+    { wch: 22 },
+    { wch: 12 },
+    { wch: 12 },
+    { wch: 8 },
+    { wch: 34 },
+    { wch: 12 },
+  ];
   XLSX.utils.book_append_sheet(wb, ws, "Vale");
 
   const summary: (string | number)[][] = [["Driver", "Total"]];

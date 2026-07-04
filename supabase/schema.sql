@@ -107,6 +107,7 @@ create table if not exists disbursement_requests (
   week_start date not null,                    -- Monday of txn_date's cutoff week
   receipt_status text check (receipt_status in ('with_receipt','pending','charge_driver')),
   ca_installment text,
+  truck_plate text,
   status text not null default 'Requested'
     check (status in ('Requested','Submitted','Approved','Rejected','Disbursed')),
   batch_id uuid references disbursement_batches(id),

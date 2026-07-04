@@ -202,6 +202,11 @@ export default function Encoder({
                         </td>
                         <td className="px-3 py-2 font-medium text-slate-800">
                           {r.driverName}
+                          {r.truckPlate && (
+                            <span className="ml-1 font-normal text-xs text-slate-400">
+                              · {r.truckPlate}
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2">
                           {r.rail ? <RailPill rail={r.rail} /> : "—"}

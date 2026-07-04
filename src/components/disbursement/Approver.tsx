@@ -356,6 +356,11 @@ function BatchCard({
                 <tr key={r.id}>
                   <td className="py-1.5 pr-3 font-medium text-slate-700">
                     {r.driverName}
+                    {r.truckPlate && (
+                      <span className="ml-1 text-xs font-normal text-slate-400">
+                        · {r.truckPlate}
+                      </span>
+                    )}
                   </td>
                   <td className="py-1.5 pr-3">
                     {r.rail ? <RailPill rail={r.rail} /> : "—"}

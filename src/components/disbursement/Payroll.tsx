@@ -119,6 +119,7 @@ export default function Payroll({
         .map((r) => ({
           driver: g.driverName,
           date: toDateInput(r.txnDate),
+          plate: r.truckPlate,
           type:
             r.type === "CA" && r.caInstallment
               ? `CA (${r.caInstallment})`
@@ -235,6 +236,7 @@ export default function Payroll({
                           <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                             <tr>
                               <th className="px-3 py-1.5">Date</th>
+                              <th className="px-3 py-1.5">Plate</th>
                               <th className="px-3 py-1.5">Type</th>
                               <th className="px-3 py-1.5">Justification</th>
                               <th className="px-3 py-1.5 text-right">Amount</th>
@@ -245,6 +247,9 @@ export default function Payroll({
                               <tr key={r.id}>
                                 <td className="px-3 py-1.5 tabular-nums text-slate-500">
                                   {toDateInput(r.txnDate)}
+                                </td>
+                                <td className="px-3 py-1.5 text-slate-600">
+                                  {r.truckPlate || "—"}
                                 </td>
                                 <td className="px-3 py-1.5">
                                   <Badge tone={typeTone(r.type)}>{r.type}</Badge>
