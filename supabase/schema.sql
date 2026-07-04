@@ -21,7 +21,7 @@ exception when duplicate_object then null; end $$;
 -- ---- Reference: garages ----------------------------------------------------
 create table if not exists garages (name text primary key);
 insert into garages (name) values
-  ('Meycauayan Main'),('Meycauayan 2'),('Teresa Rizal'),('Phividec'),('Bacolor')
+  ('Meycauayan Main'),('Meycauayan 2'),('Teresa Rizal'),('Phividec'),('Bacolor'),('Ibaan')
 on conflict do nothing;
 
 -- ---- Profiles (one row per auth user; carries role + access flags) ----------
@@ -79,10 +79,12 @@ create table if not exists drivers (
   rail text not null check (rail in ('BPI','MAYA')),
   number text not null,                       -- BPI account OR Maya mobile; ALWAYS text
   garage text references garages(name),
-  default_fleet text,
+  default_fleet text,                         -- request group, assigned locally
   active boolean not null default true,
+  hr_emp_no text,                             -- HR employee no. (sync key from the HR project)
   created_at timestamptz not null default now()
 );
+create unique index if not exists idx_drivers_hr_emp_no on drivers(hr_emp_no);
 
 create table if not exists disbursement_batches (
   id uuid primary key default gen_random_uuid(),

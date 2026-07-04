@@ -29,6 +29,7 @@ export const GARAGES = [
   "Teresa Rizal",
   "Phividec",
   "Bacolor",
+  "Ibaan",
 ];
 
 // Request groups — a driver belongs to one; ops users are assigned one or more,

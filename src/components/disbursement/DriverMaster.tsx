@@ -1,26 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Download,
-  FileText,
   Pencil,
-  Plus,
+  RefreshCw,
   Search,
   Trash2,
-  Upload,
   Loader2,
 } from "lucide-react";
-import { Modal, Select, Text } from "../forms";
+import { Modal, Select } from "../forms";
 import { Badge } from "../ui";
 import { FLEETS, GARAGES } from "../../data/types";
 import {
-  createDriver,
-  createDriversBulk,
   deleteDriver,
   fetchDrivers,
   normalizeDriverNumber,
+  syncDriversFromHR,
   updateDriver,
   type Driver,
-  type DriverInput,
+  type HRDriverRow,
   type Rail,
 } from "../../data/disbursement";
 import { downloadFile } from "../../lib/fileGen";
@@ -31,6 +28,11 @@ import {
   PrimaryButton,
   RailPill,
 } from "./shared";
+
+// The driver master is EXTRACTED from the HR Recruitment Directory project —
+// drivers are never created here. Run supabase/hr-export-drivers.sql in the
+// HR project, Download CSV, then "Sync from HR" below. Locally we only assign
+// the request group and the active flag.
 
 export default function DriverMaster({
   isAdmin,
@@ -43,7 +45,7 @@ export default function DriverMaster({
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [railFilter, setRailFilter] = useState<"All" | Rail>("All");
-  const [editing, setEditing] = useState<Driver | "new" | null>(null);
+  const [editing, setEditing] = useState<Driver | null>(null);
   const [importing, setImporting] = useState(false);
 
   function reload() {
@@ -62,7 +64,8 @@ export default function DriverMaster({
           (railFilter === "All" || d.rail === railFilter) &&
           (search === "" ||
             d.name.toLowerCase().includes(search.toLowerCase()) ||
-            d.number.includes(search))
+            d.number.includes(search) ||
+            (d.hrEmpNo ?? "").toLowerCase().includes(search.toLowerCase()))
       ),
     [drivers, search, railFilter]
   );
@@ -85,26 +88,11 @@ export default function DriverMaster({
     }
   }
 
-  function downloadTemplate() {
-    const header = "name,rail,number,garage,default_fleet,active";
-    // Two example rows (BPI keeps leading zeros; Maya accepts 09… or 639…).
-    // Replace these with your real drivers before importing.
-    const examples = [
-      `Juan dela Cruz,BPI,"0123456789",Meycauayan Main,TERESA,true`,
-      `Pedro Santos,MAYA,"09171234567",Phividec,COKE LUZON,true`,
-    ];
-    downloadFile(
-      "drivers-template.csv",
-      new Blob([[header, ...examples].join("\r\n") + "\r\n"], {
-        type: "text/csv",
-      })
-    );
-  }
-
   function exportCsv() {
-    const header = "name,rail,number,garage,default_fleet,active";
+    const header = "emp_no,name,rail,number,garage,request_group,active";
     const rows = drivers.map((d) =>
       [
+        csvCell(d.hrEmpNo ?? ""),
         csvCell(d.name),
         d.rail,
         // keep leading zeros readable in Excel by quoting
@@ -124,16 +112,19 @@ export default function DriverMaster({
     setImporting(true);
     try {
       const text = await file.text();
-      const { rows, errors } = parseDriverCsv(text);
+      const { rows, errors, skipped } = parseHRCsv(text);
       if (errors.length) {
-        onToast(`Import aborted: ${errors[0]}`);
+        onToast(`Sync aborted: ${errors[0]}`);
         return;
       }
-      const n = await createDriversBulk(rows);
-      onToast(`Imported ${n} driver${n === 1 ? "" : "s"}`);
+      const n = await syncDriversFromHR(rows);
+      onToast(
+        `Synced ${n} driver${n === 1 ? "" : "s"} from HR` +
+          (skipped ? ` (${skipped} unknown garage${skipped === 1 ? "" : "s"} left blank)` : "")
+      );
       reload();
     } catch (e: any) {
-      onToast(`Import failed: ${e.message ?? e}`);
+      onToast(`Sync failed: ${e.message ?? e}`);
     } finally {
       setImporting(false);
     }
@@ -149,23 +140,20 @@ export default function DriverMaster({
         </div>
 
         <Panel
-          title="Driver master"
+          title="Driver master (from HR)"
           actions={
             <div className="flex items-center gap-2">
-              <GhostButton onClick={downloadTemplate}>
-                <FileText size={15} /> Template
-              </GhostButton>
               <GhostButton onClick={exportCsv}>
                 <Download size={15} /> Export
               </GhostButton>
               {isAdmin && (
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600">
                   {importing ? (
                     <Loader2 size={15} className="animate-spin" />
                   ) : (
-                    <Upload size={15} />
+                    <RefreshCw size={15} />
                   )}
-                  Import
+                  Sync from HR
                   <input
                     type="file"
                     accept=".csv,text/csv"
@@ -179,9 +167,6 @@ export default function DriverMaster({
                   />
                 </label>
               )}
-              <PrimaryButton onClick={() => setEditing("new")}>
-                <Plus size={15} /> Add driver
-              </PrimaryButton>
             </div>
           }
         >
@@ -194,7 +179,7 @@ export default function DriverMaster({
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search name or number…"
+                placeholder="Search name, number, or emp no…"
                 className="w-full rounded-md border border-slate-300 py-2 pl-9 pr-3 text-sm outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
               />
             </div>
@@ -214,17 +199,21 @@ export default function DriverMaster({
               <Loader2 className="animate-spin" />
             </div>
           ) : filtered.length === 0 ? (
-            <EmptyState>No drivers match.</EmptyState>
+            <EmptyState>
+              No drivers yet. Run <code>hr-export-drivers.sql</code> in the HR
+              project, download the CSV, then click <b>Sync from HR</b>.
+            </EmptyState>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-slate-200">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                   <tr>
+                    <th className="px-3 py-2">Emp #</th>
                     <th className="px-3 py-2">Name</th>
                     <th className="px-3 py-2">Rail</th>
                     <th className="px-3 py-2">Number</th>
                     <th className="px-3 py-2">Garage</th>
-                    <th className="px-3 py-2">Default fleet</th>
+                    <th className="px-3 py-2">Request group</th>
                     <th className="px-3 py-2">Status</th>
                     <th className="px-3 py-2" />
                   </tr>
@@ -232,6 +221,9 @@ export default function DriverMaster({
                 <tbody className="divide-y divide-slate-100">
                   {filtered.map((d) => (
                     <tr key={d.id} className="hover:bg-slate-50">
+                      <td className="px-3 py-2 font-mono text-xs text-slate-500">
+                        {d.hrEmpNo ?? "—"}
+                      </td>
                       <td className="px-3 py-2 font-medium text-slate-800">
                         {d.name}
                       </td>
@@ -244,8 +236,12 @@ export default function DriverMaster({
                       <td className="px-3 py-2 text-slate-600">
                         {d.garage ?? "—"}
                       </td>
-                      <td className="px-3 py-2 text-slate-600">
-                        {d.defaultFleet ?? "—"}
+                      <td className="px-3 py-2">
+                        {d.defaultFleet ? (
+                          <span className="text-slate-700">{d.defaultFleet}</span>
+                        ) : (
+                          <span className="text-xs text-red-500">unassigned</span>
+                        )}
                       </td>
                       <td className="px-3 py-2">
                         <Badge tone={d.active ? "emerald" : "slate"}>
@@ -257,17 +253,19 @@ export default function DriverMaster({
                           <button
                             onClick={() => setEditing(d)}
                             className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-amber-600"
-                            title="Edit"
+                            title="Assign request group"
                           >
                             <Pencil size={15} />
                           </button>
-                          <button
-                            onClick={() => remove(d)}
-                            className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                            title="Delete"
-                          >
-                            <Trash2 size={15} />
-                          </button>
+                          {isAdmin && (
+                            <button
+                              onClick={() => remove(d)}
+                              className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                              title="Delete"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -277,24 +275,22 @@ export default function DriverMaster({
             </div>
           )}
           <p className="mt-3 text-[11px] text-slate-400">
-            CSV columns: <code>name, rail, number, garage, default_fleet, active</code>.
-            Maya numbers are normalized to 639XXXXXXXXX; BPI accounts keep leading
-            zeros.
+            Names, rails, and account numbers come from the HR Recruitment
+            Directory (drivers are never created here). Re-syncing updates
+            existing rows by employee number and keeps your request-group
+            assignments. Locally you only set the <b>request group</b> and{" "}
+            <b>active</b> flag.
           </p>
         </Panel>
       </div>
 
       {editing && (
-        <DriverForm
-          driver={editing === "new" ? null : editing}
+        <GroupForm
+          driver={editing}
           onClose={() => setEditing(null)}
-          onSaved={(d, isNew) => {
-            setDrivers((prev) =>
-              isNew
-                ? [...prev, d].sort((a, b) => a.name.localeCompare(b.name))
-                : prev.map((x) => (x.id === d.id ? d : x))
-            );
-            onToast(isNew ? "Driver added" : "Driver updated");
+          onSaved={(d) => {
+            setDrivers((prev) => prev.map((x) => (x.id === d.id ? d : x)));
+            onToast("Driver updated");
             setEditing(null);
           }}
         />
@@ -316,53 +312,32 @@ function Stat({ label, value }: { label: string; value: number }) {
   );
 }
 
-// ---- driver create / edit form ---------------------------------------------
+// ---- request-group / active editor (identity fields are HR-owned) -----------
 
-function DriverForm({
+function GroupForm({
   driver,
   onClose,
   onSaved,
 }: {
-  driver: Driver | null;
+  driver: Driver;
   onClose: () => void;
-  onSaved: (d: Driver, isNew: boolean) => void;
+  onSaved: (d: Driver) => void;
 }) {
-  const [name, setName] = useState(driver?.name ?? "");
-  const [rail, setRail] = useState<Rail>(driver?.rail ?? "BPI");
-  const [number, setNumber] = useState(driver?.number ?? "");
-  const [garage, setGarage] = useState(driver?.garage ?? "");
-  const [fleet, setFleet] = useState(driver?.defaultFleet ?? "");
-  const [active, setActive] = useState(driver?.active ?? true);
+  const [fleet, setFleet] = useState(driver.defaultFleet ?? "");
+  const [active, setActive] = useState(driver.active);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
-    let normalized: string;
-    try {
-      normalized = normalizeDriverNumber(rail, number);
-    } catch (ve: any) {
-      setErr(ve.message);
-      return;
-    }
-    const input: DriverInput = {
-      name: name.trim(),
-      rail,
-      number: normalized,
-      garage: garage || null,
-      defaultFleet: fleet.trim() || null,
-      active,
-    };
     setBusy(true);
     try {
-      if (driver) {
-        await updateDriver(driver.id, input);
-        onSaved({ ...driver, ...input }, false);
-      } else {
-        const created = await createDriver(input);
-        onSaved(created, true);
-      }
+      await updateDriver(driver.id, {
+        defaultFleet: fleet || null,
+        active,
+      });
+      onSaved({ ...driver, defaultFleet: fleet || null, active });
     } catch (e: any) {
       setErr(e.message ?? "Could not save.");
       setBusy(false);
@@ -370,48 +345,33 @@ function DriverForm({
   }
 
   return (
-    <Modal title={driver ? "Edit driver" : "Add driver"} onClose={onClose}>
+    <Modal title={driver.name} onClose={onClose}>
       <form onSubmit={submit}>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2">
-            <Text label="Driver name" value={name} onChange={setName} required />
+        {/* HR-owned identity — read-only */}
+        <div className="mb-4 rounded-lg bg-slate-50 px-3 py-2.5 text-sm">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-600">
+            <span className="font-mono text-xs">{driver.hrEmpNo ?? "no emp #"}</span>
+            <RailPill rail={driver.rail} />
+            <span className="font-mono text-xs">{driver.number}</span>
+            {driver.garage && <span>{driver.garage}</span>}
           </div>
-          <Select
-            label="Rail"
-            value={rail}
-            onChange={(v) => setRail(v as Rail)}
-            options={[
-              { value: "BPI", label: "BPI" },
-              { value: "MAYA", label: "Maya" },
-            ]}
-            required
-          />
-          <Text
-            label={rail === "MAYA" ? "Maya mobile" : "BPI account"}
-            value={number}
-            onChange={setNumber}
-            required
-            placeholder={rail === "MAYA" ? "0917… / 639…" : "Account number"}
-          />
-          <Select
-            label="Garage"
-            value={garage}
-            onChange={setGarage}
-            options={[
-              { value: "", label: "— none —" },
-              ...GARAGES.map((g) => ({ value: g, label: g })),
-            ]}
-          />
+          <p className="mt-1 text-[11px] text-slate-400">
+            Name, rail, and account come from HR — update them there, then
+            re-sync.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
           <Select
             label="Request group"
             value={fleet}
             onChange={setFleet}
             options={[
-              { value: "", label: "— none —" },
+              { value: "", label: "— unassigned —" },
               ...FLEETS.map((f) => ({ value: f, label: f })),
             ]}
           />
-          <div className="col-span-2">
+          <div className="flex items-end pb-2">
             <label className="flex items-center gap-2 text-sm text-slate-700">
               <input
                 type="checkbox"
@@ -419,16 +379,10 @@ function DriverForm({
                 onChange={(e) => setActive(e.target.checked)}
                 className="h-4 w-4 rounded border-slate-300 text-amber-500 focus:ring-amber-500"
               />
-              Active (selectable by operations)
+              Active
             </label>
           </div>
         </div>
-        <p className="mt-3 text-[11px] text-slate-400">
-          The number is validated on save —{" "}
-          {rail === "MAYA"
-            ? "normalized to 639XXXXXXXXX."
-            : "digits only, kept as text so leading zeros survive."}
-        </p>
         {err && <p className="mt-2 text-xs text-red-600">{err}</p>}
         <div className="mt-5 flex justify-end gap-2">
           <button
@@ -440,7 +394,7 @@ function DriverForm({
           </button>
           <PrimaryButton type="submit" disabled={busy}>
             {busy && <Loader2 size={15} className="animate-spin" />}
-            {driver ? "Save changes" : "Add driver"}
+            Save
           </PrimaryButton>
         </div>
       </form>
@@ -448,7 +402,7 @@ function DriverForm({
   );
 }
 
-// ---- CSV helpers ------------------------------------------------------------
+// ---- HR CSV parsing ----------------------------------------------------------
 
 function csvCell(s: string): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -476,58 +430,74 @@ function splitCsvLine(line: string): string[] {
   return out;
 }
 
-function parseDriverCsv(text: string): {
-  rows: DriverInput[];
+/**
+ * Parse the CSV produced by supabase/hr-export-drivers.sql
+ * (emp_no, name, rail, number, garage). Rows with a bad rail/number are
+ * reported; a garage the disbursement DB doesn't know is dropped to null
+ * rather than failing the FK.
+ */
+function parseHRCsv(text: string): {
+  rows: HRDriverRow[];
   errors: string[];
+  skipped: number;
 } {
   const lines = text
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
-  if (!lines.length) return { rows: [], errors: ["Empty file"] };
+  if (!lines.length) return { rows: [], errors: ["Empty file"], skipped: 0 };
 
   const header = splitCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
   const idx = (k: string) => header.indexOf(k);
   const ci = {
+    empNo: idx("emp_no"),
     name: idx("name"),
     rail: idx("rail"),
     number: idx("number"),
     garage: idx("garage"),
-    fleet: idx("default_fleet"),
-    active: idx("active"),
   };
-  if (ci.name < 0 || ci.rail < 0 || ci.number < 0)
-    return { rows: [], errors: ["Missing required columns name/rail/number"] };
+  if (ci.empNo < 0 || ci.name < 0 || ci.rail < 0 || ci.number < 0)
+    return {
+      rows: [],
+      errors: [
+        "Missing columns — expected the CSV from hr-export-drivers.sql (emp_no, name, rail, number, garage)",
+      ],
+      skipped: 0,
+    };
 
-  const rows: DriverInput[] = [];
+  const known = new Set<string>(GARAGES);
+  const rows: HRDriverRow[] = [];
   const errors: string[] = [];
+  let skipped = 0;
+
   for (let i = 1; i < lines.length; i++) {
     const c = splitCsvLine(lines[i]);
+    const empNo = (c[ci.empNo] ?? "").trim();
     const name = (c[ci.name] ?? "").trim();
+    if (!empNo || !name) continue;
     const railRaw = (c[ci.rail] ?? "").trim().toUpperCase();
-    if (!name) continue;
     if (railRaw !== "BPI" && railRaw !== "MAYA") {
-      errors.push(`Row ${i + 1}: rail must be BPI or MAYA`);
+      errors.push(`Row ${i + 1} (${name}): rail must be BPI or MAYA`);
       break;
     }
     const rail = railRaw as Rail;
     try {
       const number = normalizeDriverNumber(rail, c[ci.number] ?? "");
+      const garageRaw =
+        ci.garage >= 0 ? (c[ci.garage] ?? "").trim() : "";
       rows.push({
+        hrEmpNo: empNo,
         name,
         rail,
         number,
-        garage: ci.garage >= 0 ? (c[ci.garage] ?? "").trim() || null : null,
-        defaultFleet: ci.fleet >= 0 ? (c[ci.fleet] ?? "").trim() || null : null,
-        active:
-          ci.active >= 0
-            ? !/^(false|0|no|inactive)$/i.test((c[ci.active] ?? "").trim())
-            : true,
+        garage: known.has(garageRaw) ? garageRaw : null,
       });
+      // unknown garage → dropped to null so the FK doesn't reject the row
+      if (garageRaw && !known.has(garageRaw)) skipped += 1;
     } catch (e: any) {
-      errors.push(`Row ${i + 1}: ${e.message}`);
+      errors.push(`Row ${i + 1} (${name}): ${e.message}`);
       break;
     }
   }
-  return { rows, errors };
+  return { rows, errors, skipped };
 }

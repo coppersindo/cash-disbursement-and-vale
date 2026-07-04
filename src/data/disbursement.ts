@@ -24,6 +24,8 @@ export type Driver = {
   garage: string | null;
   defaultFleet: string | null;
   active: boolean;
+  /** HR employee number (sync key) — drivers are extracted from the HR project. */
+  hrEmpNo: string | null;
 };
 
 /** Safe driver shape the requester sees — no rail, no number. */
@@ -145,6 +147,7 @@ function mapDriver(row: any): Driver {
     garage: row.garage ?? null,
     defaultFleet: row.default_fleet ?? null,
     active: row.active,
+    hrEmpNo: row.hr_emp_no ?? null,
   };
 }
 
@@ -263,19 +266,34 @@ export async function deleteDriver(id: string): Promise<void> {
   if (error) throw error;
 }
 
-/** Bulk insert (CSV import). Numbers must already be validated/normalized. */
-export async function createDriversBulk(rows: DriverInput[]): Promise<number> {
+export type HRDriverRow = {
+  hrEmpNo: string;
+  name: string;
+  rail: Rail;
+  number: string; // already validated/normalized
+  garage: string | null;
+};
+
+/**
+ * Sync drivers extracted from the HR project (CSV of hr-export-drivers.sql).
+ * Upserts on hr_emp_no: re-importing UPDATES name/rail/number/garage on the
+ * same row instead of duplicating, and deliberately does NOT touch
+ * default_fleet (the request group is assigned locally) or active.
+ */
+export async function syncDriversFromHR(rows: HRDriverRow[]): Promise<number> {
   if (rows.length === 0) return 0;
-  const { error } = await db().from("drivers").insert(
-    rows.map((r) => ({
-      name: r.name,
-      rail: r.rail,
-      number: r.number,
-      garage: r.garage,
-      default_fleet: r.defaultFleet,
-      active: r.active,
-    }))
-  );
+  const { error } = await db()
+    .from("drivers")
+    .upsert(
+      rows.map((r) => ({
+        hr_emp_no: r.hrEmpNo,
+        name: r.name,
+        rail: r.rail,
+        number: r.number,
+        garage: r.garage,
+      })),
+      { onConflict: "hr_emp_no" }
+    );
   if (error) throw error;
   return rows.length;
 }
